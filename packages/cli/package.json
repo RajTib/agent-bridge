@@ -12,6 +12,7 @@
     "build": "tsc -b"
   },
   "dependencies": {
+    "@agentbridge/adapter-claude-code": "*",
     "@agentbridge/contracts": "*",
     "@agentbridge/core": "*"
   }

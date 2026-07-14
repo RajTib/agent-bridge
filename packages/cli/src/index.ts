@@ -1,6 +1,31 @@
 #!/usr/bin/env node
 
-// The `agentbridge` command: install hooks, start/stop the relay daemon,
-// inspect the audit log. Implemented in a later step.
+import { runInstall } from './commands/install';
+import { runDebugHook } from './commands/debug-hook';
 
-console.log('AgentBridge CLI — not yet implemented. See README.md roadmap.');
+const [, , command, subcommand] = process.argv;
+
+async function main(): Promise<void> {
+  switch (command) {
+    case 'install':
+      runInstall(subcommand);
+      return;
+    case 'hook':
+      // All hook events route here for now (see debug-hook.ts). Step 5 will
+      // teach this to talk to the core relay instead of just logging.
+      await runDebugHook();
+      return;
+    default:
+      console.log(
+        [
+          'AgentBridge CLI',
+          '',
+          'Usage:',
+          '  agentbridge install claude-code   Install Claude Code hooks into ~/.claude/settings.json',
+          '  agentbridge hook <event>          (internal — invoked by the installed hooks)',
+        ].join('\n'),
+      );
+  }
+}
+
+main();

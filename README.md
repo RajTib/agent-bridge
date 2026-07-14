@@ -104,7 +104,7 @@ npm test
 ## Roadmap (MVP)
 
 - [x] Repo scaffold, tooling, CI
-- [ ] Claude Code agent adapter (hook installer + normalizer)
+- [x] Claude Code agent adapter (hook installer + normalizer)
 - [ ] Discord channel adapter (bot + renderer + button handler)
 - [ ] Core relay (state machine, signed tokens, timeout, audit log)
 - [ ] End-to-end demo (fake PermissionRequest → Discord → Approve → decision round-trip)
