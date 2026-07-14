@@ -17,7 +17,8 @@
     "clean": "tsc -b --clean",
     "lint": "eslint .",
     "typecheck": "tsc -b --force",
-    "test": "vitest run"
+    "test": "vitest run",
+    "demo:discord": "node --env-file=.env packages/cli/dist/index.js demo discord"
   },
   "devDependencies": {
     "@eslint/js": "^9.9.0",

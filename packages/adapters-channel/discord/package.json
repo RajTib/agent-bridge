@@ -9,6 +9,7 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@agentbridge/contracts": "*"
+    "@agentbridge/contracts": "*",
+    "discord.js": "^14.26.5"
   }
 }

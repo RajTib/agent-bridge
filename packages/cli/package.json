@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@agentbridge/adapter-claude-code": "*",
+    "@agentbridge/adapter-discord": "*",
     "@agentbridge/contracts": "*",
     "@agentbridge/core": "*"
   }
