@@ -1,0 +1,14 @@
+{
+  "name": "@agentbridge/adapter-discord",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ChannelAdapter for Discord: bot, message renderer, Approve/Deny button handler.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@agentbridge/contracts": "*"
+  }
+}

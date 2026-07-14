@@ -1,0 +1,32 @@
+{
+  "name": "agentbridge",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Provider-agnostic, agent-agnostic approval/notification router between AI coding agents and human-facing channels.",
+  "license": "MIT",
+  "type": "module",
+  "workspaces": [
+    "packages/contracts",
+    "packages/core",
+    "packages/cli",
+    "packages/adapters-agent/*",
+    "packages/adapters-channel/*"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "tsc -b --clean",
+    "lint": "eslint .",
+    "typecheck": "tsc -b --force",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.9.0",
+    "@types/node": "^20.14.0",
+    "eslint": "^9.9.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.3.3",
+    "typescript": "^5.5.4",
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^2.0.5"
+  }
+}

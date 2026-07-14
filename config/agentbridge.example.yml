@@ -1,0 +1,28 @@
+# AgentBridge routing config.
+# Copy to ~/.agentbridge/agentbridge.yml (or set AGENTBRIDGE_CONFIG) and edit.
+
+routing:
+  # "*" matches any agent / any event_type.
+  - agent: claude-code
+    event_type: permission_required
+    channel: discord
+  - agent: claude-code
+    event_type: input_required
+    channel: discord
+  - agent: "*"
+    event_type: run_failed
+    channel: discord
+
+timeout:
+  seconds: 300
+  # What happens when nobody responds in time: fall back to the agent's
+  # normal terminal prompt rather than silently blocking or auto-approving.
+  fallback: terminal_prompt
+
+audit_log:
+  path: ~/.agentbridge/audit.log.jsonl
+
+channels:
+  discord:
+    bot_token_env: DISCORD_BOT_TOKEN
+    channel_id_env: DISCORD_CHANNEL_ID
