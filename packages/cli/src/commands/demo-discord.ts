@@ -3,6 +3,12 @@ import { createDiscordChannelAdapter } from '@agentbridge/adapter-discord';
 import type { PendingApproval } from '@agentbridge/contracts';
 
 const DEMO_TIMEOUT_MS = 5 * 60_000;
+// Gives registerInteractionHandler's own await interaction.update() time to
+// finish (it runs right after our onDecision callback resolves, on a
+// separate async chain driven by discord.js's event emitter) before we tear
+// the process down. Exiting too early is exactly what caused Discord's
+// "The application didn't respond in time" error during testing.
+const SHUTDOWN_GRACE_MS = 1500;
 
 /**
  * Live, manual test for the Discord channel adapter — sends one fake
@@ -43,16 +49,29 @@ export async function runDemoDiscord(): Promise<void> {
     },
   };
 
+  let markDecided: (() => void) | undefined;
+  const whenDecided = new Promise<void>((resolve) => {
+    markDecided = resolve;
+  });
+
   adapter.onDecision(async (approvalId, decision, decidedBy) => {
     console.log(`Received decision: ${decision} by ${decidedBy} (approvalId ${approvalId})`);
-    process.exit(0);
+    markDecided?.();
   });
 
   console.log('Sending a demo approval request to Discord — go click Approve or Deny there...');
   await adapter.send(approval);
 
-  setTimeout(() => {
+  const timedOut = await Promise.race([
+    whenDecided.then(() => false as const),
+    new Promise<true>((resolve) => setTimeout(() => resolve(true), DEMO_TIMEOUT_MS).unref()),
+  ]);
+
+  if (timedOut) {
     console.log(`No response after ${DEMO_TIMEOUT_MS / 60_000} minutes, exiting.`);
-    process.exit(0);
-  }, DEMO_TIMEOUT_MS).unref();
+  } else {
+    await new Promise((resolve) => setTimeout(resolve, SHUTDOWN_GRACE_MS));
+  }
+
+  process.exit(0);
 }
