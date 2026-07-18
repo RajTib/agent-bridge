@@ -7,7 +7,9 @@ to run something, AgentBridge relays the request — with full, untruncated cont
 human-facing channel (Discord first, others later), and relays the human's Approve/Deny
 decision back to the agent.
 
-> **Status:** early scaffold, MVP in progress. Not yet usable end-to-end.
+> **Status:** MVP in progress. The full pipeline (hook → daemon → relay → Discord → decision
+> round-trip) works and is verified with a simulated Claude Code hook payload. Not yet
+> validated against a real, live Claude Code session -- that's the next milestone.
 
 ## What this is not
 
@@ -106,7 +108,7 @@ npm test
 - [x] Repo scaffold, tooling, CI
 - [x] Claude Code agent adapter (hook installer + normalizer)
 - [x] Discord channel adapter (bot + renderer + button handler)
-- [ ] Core relay (state machine, signed tokens, timeout, audit log)
+- [x] Core relay (state machine, signed tokens, timeout, audit log)
 - [ ] End-to-end demo (fake PermissionRequest → Discord → Approve → decision round-trip)
 - [ ] `CONTRIBUTING.md` — how to add a new agent or channel adapter
 

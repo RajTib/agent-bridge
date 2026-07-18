@@ -9,6 +9,8 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@agentbridge/contracts": "*"
+    "@agentbridge/adapter-discord": "*",
+    "@agentbridge/contracts": "*",
+    "yaml": "^2.9.0"
   }
 }
