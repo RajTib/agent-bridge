@@ -205,7 +205,7 @@ export class MockTelephonyProvider implements TelephonyProvider {
   applyResponse(providerCallId: string, body: string): void {
     const c = this.calls.get(providerCallId);
     if (!c) return;
-    let actions: VoiceAction[] = [];
+    let actions: VoiceAction[];
     try {
       actions = (JSON.parse(body) as { actions: VoiceAction[] }).actions ?? [];
     } catch {

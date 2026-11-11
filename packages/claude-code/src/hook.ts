@@ -63,7 +63,7 @@ async function request(
     body: body !== undefined ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(timeoutMs),
   });
-  let json: unknown = null;
+  let json: unknown;
   try {
     json = await res.json();
   } catch {
