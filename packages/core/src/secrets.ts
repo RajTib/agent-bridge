@@ -15,24 +15,36 @@ export function defaultDataDir(): string {
  * generating a fresh random secret with owner-only permissions on first use.
  * Secret values are never logged.
  */
-export function loadOrCreateSecret(
-  dataDir: string,
-  file: string,
-  explicit: string | null,
-): { value: string; source: 'env' | 'file' | 'generated'; path: string } {
-  const path = join(dataDir, file);
-  if (explicit) return { value: explicit, source: 'env', path };
-  if (existsSync(path)) {
-    const value = readFileSync(path, 'utf8').trim();
-    if (value.length >= 24) return { value, source: 'file', path };
-  }
+function writeSecretFile(dataDir: string, path: string, value: string): void {
   mkdirSync(dataDir, { recursive: true });
-  const value = newSecret(32);
   writeFileSync(path, `${value}\n`, { encoding: 'utf8', mode: 0o600 });
   try {
     chmodSync(path, 0o600);
   } catch {
     /* best effort on Windows */
   }
+}
+
+export function loadOrCreateSecret(
+  dataDir: string,
+  file: string,
+  explicit: string | null,
+  opts: { mirrorExplicitToFile?: boolean } = {},
+): { value: string; source: 'env' | 'file' | 'generated'; path: string } {
+  const path = join(dataDir, file);
+  if (explicit) {
+    if (opts.mirrorExplicitToFile) {
+      // Let local clients that don't share our environment (the Claude Code hook) find it.
+      const onDisk = existsSync(path) ? readFileSync(path, 'utf8').trim() : null;
+      if (onDisk !== explicit) writeSecretFile(dataDir, path, explicit);
+    }
+    return { value: explicit, source: 'env', path };
+  }
+  if (existsSync(path)) {
+    const value = readFileSync(path, 'utf8').trim();
+    if (value.length >= 24) return { value, source: 'file', path };
+  }
+  const value = newSecret(32);
+  writeSecretFile(dataDir, path, value);
   return { value, source: 'generated', path };
 }

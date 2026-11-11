@@ -152,6 +152,11 @@ describe('DTMF approval flow (mock provider)', () => {
 
     const res = await t.deliver(t.provider.press(call.providerCallId!, '1'));
     expect(res.body).toContain('Approved.');
+    await flush();
+    // The confirmation must be spoken before the call ends; AgentBridge must not cut it off.
+    const transcript = t.provider.get(call.providerCallId!)!.transcript;
+    expect(transcript).not.toContain('[call ended by AgentBridge]');
+    expect(transcript.slice(-2)).toEqual([expect.stringContaining('Approved.'), '[AgentBridge hung up]']);
     expect(t.decisions.get(d.id)!.status).toBe('approved');
     expect(t.decisions.get(d.id)!.resolutionChannel).toBe('phone');
     expect(t.decisions.get(other.id)!.status).toBe('pending');

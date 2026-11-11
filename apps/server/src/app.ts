@@ -102,7 +102,9 @@ export async function buildApp(o: BuildOptions): Promise<{ app: FastifyInstance;
     bus.on('audit', (e) => discord!.handle(e));
   }
 
-  const hookToken = loadOrCreateSecret(config.dataDir, HOOK_TOKEN_FILE, config.hookToken);
+  const hookToken = loadOrCreateSecret(config.dataDir, HOOK_TOKEN_FILE, config.hookToken, {
+    mirrorExplicitToFile: true,
+  });
   const password = loadOrCreateSecret(config.dataDir, DASHBOARD_PASSWORD_FILE, config.dashboardPassword);
   const authDeps: AuthDeps = { store, hookToken: hookToken.value, dashboardPassword: password.value, now };
 

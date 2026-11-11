@@ -209,6 +209,8 @@ export class CallManager {
         status: latest && latest.status !== 'initiating' ? latest.status : 'ringing',
       })!;
       this.o.bus.emit('call', updated);
+      // Upper bound on a call's lifetime: ring time plus a generous conversation window.
+      this.watch(call.id, (this.o.telephony.ringTimeoutSeconds + 600) * 1000, 'failed', 'no terminal status from provider');
       this.o.audit.record({
         type: 'call.initiated',
         decisionId: d.id,
@@ -278,7 +280,8 @@ export class CallManager {
     if (!this.activeCallId) return;
     const call = this.o.store.getCall(this.activeCallId);
     if (!call || call.decisionId !== d.id || TERMINAL_CALL_STATUSES.includes(call.status)) return;
-    if (d.resolutionChannel === 'phone' && call.result) return; // this call decided it; it hangs up itself
+    // Only the active call can resolve via phone; it speaks the confirmation and hangs up itself.
+    if (d.resolutionChannel === 'phone') return;
     // Decided elsewhere (dashboard/timeout/cancel): stop ringing the developer.
     const updated = this.o.store.updateCall(call.id, { result: 'superseded' })!;
     this.o.bus.emit('call', updated);
@@ -387,11 +390,39 @@ export class CallManager {
   }
 
   private end(call: CallRow, text: string, result: CallRow['result']): VoiceAction[] {
-    if (result && !call.result) {
+    const latest = this.o.store.getCall(call.id);
+    if (result && latest && !latest.result) {
       const updated = this.o.store.updateCall(call.id, { result })!;
       this.o.bus.emit('call', updated);
     }
+    // We are hanging up. The provider's final status callback normally closes the
+    // call; if it never arrives (e.g. tunnel hiccup), don't let the queue stall.
+    this.watch(call.id, 30_000, 'completed', 'hung up by AgentBridge; no final status callback received');
     return [{ type: 'say', text }, { type: 'hangup' }];
+  }
+
+  /** Force-closes a call that never reports a terminal status, so the queue keeps moving. */
+  private watch(callId: string, ms: number, status: CallStatus, note: string): void {
+    const timer = setTimeout(() => {
+      const c = this.o.store.getCall(callId);
+      if (!c || TERMINAL_CALL_STATUSES.includes(c.status)) return;
+      const updated = this.o.store.updateCall(callId, {
+        status,
+        endedAt: this.now().toISOString(),
+        result: c.result ?? 'no_response',
+        error: c.error ?? note,
+      })!;
+      this.o.bus.emit('call', updated);
+      this.o.audit.record({
+        type: 'call.ended',
+        level: 'warn',
+        callId,
+        decisionId: c.decisionId,
+        message: `Call closed by watchdog: ${note}`,
+      });
+      this.finish(callId);
+    }, ms);
+    timer.unref();
   }
 
   private onVoice(call: CallRow, query: Record<string, string | undefined>): VoiceAction[] {

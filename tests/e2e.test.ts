@@ -172,6 +172,19 @@ describe('end-to-end approval via (simulated) phone call', () => {
     expect((await hook).stdout.trim()).toBe('');
   });
 
+  it('the call queue advances: back-to-back requests each get their own call', async () => {
+    const { base, cookie, services } = await startServer();
+    for (const [i, digit] of [['1', '1'], ['2', '0']] as const) {
+      const hook = runHook(base, payload(`npm install lib-${i}`, `seq-${i}`));
+      const call = await ringingCall(base, cookie);
+      await mockPhone(base, cookie, call.callId, 'answer');
+      await mockPhone(base, cookie, call.callId, 'press', { digit });
+      const out = JSON.parse((await hook).stdout);
+      expect(out.hookSpecificOutput.decision.behavior).toBe(digit === '1' ? 'allow' : 'deny');
+      expect(services.store.getCall(call.callId)!.status).toBe('completed');
+    }
+  });
+
   it('server unavailable: hook exits cleanly with no decision', async () => {
     const { stdout, code } = await runHook('http://127.0.0.1:9', payload('ls'));
     expect(code).toBe(0);

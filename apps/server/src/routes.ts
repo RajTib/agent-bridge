@@ -309,7 +309,13 @@ export async function registerRoutes(app: FastifyInstance, s: Services): Promise
         headers: { ...w.headers, 'content-type': 'application/x-www-form-urlencoded' },
         payload: new URLSearchParams(w.params).toString(),
       });
-      if (res.statusCode === 200) mock.applyResponse(providerCallId, res.body);
+      if (res.statusCode === 200) {
+        mock.applyResponse(providerCallId, res.body);
+        // Like a real carrier, report the final status once AgentBridge hangs up.
+        if (mock.get(providerCallId)?.state === 'ended' && w.params.CallStatus !== 'completed') {
+          await deliver(mock.status(providerCallId, 'completed'), providerCallId);
+        }
+      }
       return res.statusCode < 300;
     };
 

@@ -9,7 +9,7 @@ export default [
   prettier,
   {
     languageOptions: {
-      globals: { process: 'readonly', console: 'readonly', URL: 'readonly', fetch: 'readonly' },
+      globals: { process: 'readonly', console: 'readonly', URL: 'readonly', fetch: 'readonly', setTimeout: 'readonly' },
     },
     rules: {
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
