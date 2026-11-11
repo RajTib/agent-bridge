@@ -55,6 +55,13 @@ export class CallManager {
   }
 
   start(): void {
+    // Calls left open by a previous server process: their webhooks still work (state
+    // is in SQLite), but close them if no terminal status arrives soon.
+    for (const c of this.o.store.listCalls({ limit: 500 })) {
+      if (!TERMINAL_CALL_STATUSES.includes(c.status)) {
+        this.watch(c.id, 60_000, 'failed', 'call was open when the server restarted');
+      }
+    }
     this.unsubscribers.push(
       this.o.bus.on('decision.created', (d) => this.onDecisionCreated(d)),
       this.o.bus.on('decision.resolved', (d) => {
@@ -376,7 +383,8 @@ export class CallManager {
 
   private gatherPrompt(call: CallRow, lines: string[]): VoiceAction[] {
     const seq = call.promptSeq + 1;
-    this.o.store.updateCall(call.id, { promptSeq: seq, promptsPlayed: call.promptsPlayed + 1 });
+    const updated = this.o.store.updateCall(call.id, { promptSeq: seq, promptsPlayed: call.promptsPlayed + 1 });
+    if (updated) this.o.bus.emit('call', updated);
     return [
       {
         type: 'gather',
