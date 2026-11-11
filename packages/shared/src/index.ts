@@ -210,7 +210,12 @@ export interface HookDecisionResponse {
   duplicate?: boolean;
   resolutionNote?: string | null;
   resolutionChannel?: ResolutionChannel | null;
+  /** What the hook should do if this decision never gets approved/rejected. */
+  timeoutBehavior: 'ask' | 'deny';
 }
+
+/** Tools whose permission prompt needs interactive input a phone keypad cannot provide. */
+export const PASSTHROUGH_TOOLS: readonly string[] = ['AskUserQuestion', 'ExitPlanMode'];
 
 export const DEFAULT_PORT = 4317;
 export const CSRF_HEADER = 'x-agentbridge-csrf';
