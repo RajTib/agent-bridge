@@ -1,0 +1,21 @@
+{
+  "name": "@agentbridge/server",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/app.js",
+  "types": "dist/app.d.ts",
+  "dependencies": {
+    "@agentbridge/claude-code": "*",
+    "@agentbridge/core": "*",
+    "@agentbridge/discord": "*",
+    "@agentbridge/shared": "*",
+    "@agentbridge/telephony": "*",
+    "@fastify/cookie": "^11.1.5",
+    "@fastify/formbody": "^9.0.1",
+    "@fastify/rate-limit": "^11.2.2",
+    "@fastify/static": "^10.1.10",
+    "fastify": "^5.12.8",
+    "zod": "^4.6.7"
+  }
+}

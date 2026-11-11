@@ -2,8 +2,9 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    passWithNoTests: true,
-    include: ['packages/**/src/**/*.test.ts'],
+    include: ['packages/*/src/**/*.test.ts', 'apps/server/src/**/*.test.ts', 'tests/**/*.test.ts'],
     exclude: ['**/node_modules/**', '**/dist/**'],
+    testTimeout: 20_000,
+    pool: 'forks',
   },
 });

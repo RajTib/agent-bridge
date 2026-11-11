@@ -1,16 +1,10 @@
 {
   "name": "@agentbridge/core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "AgentBridge relay daemon: approval state machine, signed tokens, routing, audit log.",
+  "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "scripts": {
-    "build": "tsc -b"
-  },
-  "dependencies": {
-    "@agentbridge/adapter-discord": "*",
-    "@agentbridge/contracts": "*",
-    "yaml": "^2.9.0"
-  }
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "dependencies": { "@agentbridge/shared": "*", "zod": "^4.6.7" }
 }

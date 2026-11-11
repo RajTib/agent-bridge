@@ -1,34 +1,46 @@
 {
   "name": "agentbridge",
   "private": true,
-  "version": "0.1.0",
-  "description": "Provider-agnostic, agent-agnostic approval/notification router between AI coding agents and human-facing channels.",
+  "version": "0.2.0",
+  "description": "Human-in-the-loop phone-call approval bridge for autonomous coding agents (Claude Code first).",
   "license": "MIT",
   "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
   "workspaces": [
-    "packages/contracts",
+    "packages/shared",
     "packages/core",
-    "packages/cli",
-    "packages/adapters-agent/*",
-    "packages/adapters-channel/*"
+    "packages/telephony",
+    "packages/discord",
+    "packages/claude-code",
+    "apps/server",
+    "apps/dashboard"
   ],
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsc -b && npm run build -w @agentbridge/dashboard",
+    "build:ts": "tsc -b",
     "clean": "tsc -b --clean",
+    "typecheck": "tsc -b && npm run typecheck -w @agentbridge/dashboard",
     "lint": "eslint .",
-    "typecheck": "tsc -b --force",
+    "format": "prettier --write .",
     "test": "vitest run",
-    "demo:discord": "node --env-file=.env packages/cli/dist/index.js demo discord",
-    "daemon": "node --env-file=.env packages/cli/dist/index.js daemon start"
+    "test:watch": "vitest",
+    "start": "node apps/server/dist/main.js",
+    "dev": "npm run build:ts && node --watch apps/server/dist/main.js",
+    "dev:dashboard": "npm run dev -w @agentbridge/dashboard",
+    "setup": "node scripts/setup.mjs",
+    "hooks:install": "node packages/claude-code/dist/cli.js install",
+    "hooks:uninstall": "node packages/claude-code/dist/cli.js uninstall"
   },
   "devDependencies": {
-    "@eslint/js": "^9.9.0",
-    "@types/node": "^20.14.0",
-    "eslint": "^9.9.0",
-    "eslint-config-prettier": "^9.1.0",
-    "prettier": "^3.3.3",
-    "typescript": "^5.5.4",
-    "typescript-eslint": "^8.0.0",
-    "vitest": "^2.0.5"
+    "@eslint/js": "^10.0.0",
+    "@types/node": "^24.19.2",
+    "eslint": "^10.14.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.6.2",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.72.2",
+    "vitest": "^5.1.0"
   }
 }

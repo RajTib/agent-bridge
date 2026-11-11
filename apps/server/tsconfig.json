@@ -1,0 +1,7 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "rootDir": "src", "outDir": "dist" },
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts", "src/test-utils/**"],
+  "references": [{ "path": "../../packages/shared" }, { "path": "../../packages/core" }, { "path": "../../packages/telephony" }, { "path": "../../packages/discord" }, { "path": "../../packages/claude-code" }]
+}

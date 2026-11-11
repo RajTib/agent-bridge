@@ -1,10 +1,11 @@
 {
   "files": [],
   "references": [
-    { "path": "packages/contracts" },
+    { "path": "packages/shared" },
     { "path": "packages/core" },
-    { "path": "packages/cli" },
-    { "path": "packages/adapters-agent/claude-code" },
-    { "path": "packages/adapters-channel/discord" }
+    { "path": "packages/telephony" },
+    { "path": "packages/discord" },
+    { "path": "packages/claude-code" },
+    { "path": "apps/server" }
   ]
 }

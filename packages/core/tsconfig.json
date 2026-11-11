@@ -1,9 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": {
-    "outDir": "dist",
-    "rootDir": "src"
-  },
-  "references": [{ "path": "../contracts" }, { "path": "../adapters-channel/discord" }],
-  "include": ["src"]
+  "compilerOptions": { "rootDir": "src", "outDir": "dist" },
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts", "src/test-utils/**"],
+  "references": [{ "path": "../shared" }]
 }
