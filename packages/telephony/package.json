@@ -5,6 +5,17 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
-  "dependencies": { "@agentbridge/shared": "*", "@agentbridge/core": "*" }
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@agentbridge/core": "*",
+    "@agentbridge/shared": "*"
+  },
+  "devDependencies": {
+    "twilio": "^5.13.1"
+  }
 }
