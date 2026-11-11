@@ -52,7 +52,7 @@ decisions via JSON only.
 ## Flow
 
 1. Claude Code runs `node .../hook.js PermissionRequest --agentbridge` with the payload on stdin.
-2. The hook `POST`s `/api/hooks/permission-request` (bearer token). The server creates a
+2. The hook `POST`s `/api/hooks/permission-request` (HMAC-signed; the token is never sent). The server creates a
    decision `dec_<128-bit random>`, or reuses an identical pending one (duplicate
    protection: same agent + session + tool + input).
 3. The hook long-polls `/api/hooks/decisions/:id/wait` (20 s slices, each a heartbeat). If

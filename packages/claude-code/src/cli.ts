@@ -9,22 +9,20 @@
  */
 import { parseArgs } from 'node:util';
 import { defaultHookScriptPath, installHooks, settingsPathFor, uninstallHooks } from './install.js';
-import { resolveHookEnv } from './hook.js';
+import { hookRequest, resolveHookEnv } from './hook.js';
 
 async function status(): Promise<number> {
   const env = resolveHookEnv();
   console.log(`Server URL : ${env.baseUrl}`);
   console.log(`Hook token : ${env.token ? 'found' : 'MISSING (start the server once, or set AGENTBRIDGE_HOOK_TOKEN)'}`);
+  if (!env.token) return 1;
   try {
-    const res = await fetch(`${env.baseUrl}/api/hooks/ping`, {
-      headers: env.token ? { authorization: `Bearer ${env.token}` } : {},
-      signal: AbortSignal.timeout(3000),
-    });
+    const res = await hookRequest(env, 'GET', '/api/hooks/ping', undefined, 3000);
     if (res.status === 200) {
-      console.log('Connection : OK (token accepted)');
+      console.log('Connection : OK (mutually authenticated with the hook token)');
       return 0;
     }
-    console.log(`Connection : server answered HTTP ${res.status}${res.status === 401 ? ' (token rejected)' : ''}`);
+    console.log(`Connection : server answered HTTP ${res.status}`);
   } catch (err) {
     console.log(`Connection : FAILED (${(err as Error).message}) -- is the server running?`);
   }

@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { loadConfig } from '@agentbridge/core';
 import { TwilioProvider, computeTwilioSignature } from '@agentbridge/telephony';
+import { randomBytes } from 'node:crypto';
+import { signHookRequest, verifyHookResponse } from '@agentbridge/claude-code';
 import { buildApp, startServices, type Services } from './app.js';
 
 const PASSWORD = 'correct horse battery staple';
@@ -43,7 +45,28 @@ async function login(app: FastifyInstance): Promise<string> {
   return cookie.split(';')[0]!;
 }
 
-const hookHeaders = { authorization: `Bearer ${HOOK_TOKEN}` };
+function signHeaders(method: string, url: string, token = HOOK_TOKEN, nonce = randomBytes(18).toString('base64url')) {
+  const ts = String(Date.now());
+  return {
+    'x-agentbridge-ts': ts,
+    'x-agentbridge-nonce': nonce,
+    'x-agentbridge-signature': signHookRequest(token, method, url, ts, nonce),
+  };
+}
+
+/** Injects a hook API request signed exactly like the real hook client does. */
+async function signed(
+  app: FastifyInstance,
+  opts: { method: 'GET' | 'POST'; url: string; payload?: unknown; headers?: Record<string, string> },
+) {
+  const headers = { ...signHeaders(opts.method, opts.url), ...opts.headers };
+  const res = await app.inject({ ...opts, headers, payload: opts.payload as Record<string, unknown> });
+  // Every authenticated response must carry a valid proof for the hook to accept it.
+  expect(
+    verifyHookResponse(HOOK_TOKEN, headers['x-agentbridge-nonce'], res.body, (res.headers['x-agentbridge-proof'] as string) ?? null),
+  ).toBe(res.statusCode !== 401);
+  return res;
+}
 const permission = (over: Record<string, unknown> = {}) => ({
   sessionId: 'session-1',
   cwd: '/work/shop-api',
@@ -53,7 +76,7 @@ const permission = (over: Record<string, unknown> = {}) => ({
 });
 
 async function createDecision(app: FastifyInstance, over: Record<string, unknown> = {}) {
-  const res = await app.inject({ method: 'POST', url: '/api/hooks/permission-request', headers: hookHeaders, payload: permission(over) });
+  const res = await signed(app, { method: 'POST', url: '/api/hooks/permission-request', payload: permission(over) });
   expect(res.statusCode).toBe(201);
   return res.json() as { decisionId: string; status: string; timeoutBehavior: string };
 }
@@ -108,17 +131,37 @@ describe('authentication', () => {
     expect(last).toBe(429);
   });
 
-  it('requires the hook token for the hook API', async () => {
+  it('requires a valid, fresh, single-use hook signature (the token itself is never sent)', async () => {
     const { app } = await setup();
-    const res = await app.inject({ method: 'POST', url: '/api/hooks/permission-request', payload: permission() });
-    expect(res.statusCode).toBe(401);
-    const wrong = await app.inject({
-      method: 'POST',
-      url: '/api/hooks/permission-request',
-      headers: { authorization: 'Bearer wrong-token-wrong-token-wrong' },
-      payload: permission(),
-    });
-    expect(wrong.statusCode).toBe(401);
+    const url = '/api/hooks/permission-request';
+    const unsigned = await app.inject({ method: 'POST', url, payload: permission() });
+    expect(unsigned.statusCode).toBe(401);
+    expect(unsigned.headers['x-agentbridge-proof']).toBeUndefined();
+    const bearer = await app.inject({ method: 'POST', url, headers: { authorization: `Bearer ${HOOK_TOKEN}` }, payload: permission() });
+    expect(bearer.statusCode).toBe(401);
+    const wrongKey = await app.inject({ method: 'POST', url, headers: signHeaders('POST', url, 'x'.repeat(32)), payload: permission() });
+    expect(wrongKey.statusCode).toBe(401);
+    const otherPath = await app.inject({ method: 'POST', url, headers: signHeaders('POST', '/api/hooks/event'), payload: permission() });
+    expect(otherPath.statusCode).toBe(401);
+    const h = signHeaders('POST', url);
+    expect((await app.inject({ method: 'POST', url, headers: h, payload: permission() })).statusCode).toBe(201);
+    expect((await app.inject({ method: 'POST', url, headers: h, payload: permission() })).statusCode).toBe(401); // replayed nonce
+  });
+
+  it('only exposes the telephony webhooks through the public tunnel', async () => {
+    const { app } = await setup({ AGENTBRIDGE_PUBLIC_URL: 'https://bridge.example.com' });
+    const viaTunnel = { host: 'bridge.example.com', 'cf-connecting-ip': '203.0.113.9' };
+    for (const [method, url] of [
+      ['GET', '/'],
+      ['POST', '/api/auth/login'],
+      ['GET', '/api/overview'],
+      ['POST', '/api/hooks/permission-request'],
+    ] as const) {
+      expect((await app.inject({ method, url, headers: viaTunnel, payload: method === 'POST' ? {} : undefined })).statusCode, url).toBe(404);
+    }
+    const webhook = await app.inject({ method: 'POST', url: '/telephony/mock/call_x/voice', headers: viaTunnel, payload: {} });
+    expect(webhook.statusCode).toBe(403); // reached the webhook route, refused for lack of a signature
+    expect((await app.inject({ method: 'GET', url: '/api/health' })).statusCode).toBe(200); // local still fine
   });
 
   it('sets security headers', async () => {
@@ -133,10 +176,9 @@ describe('authentication', () => {
 describe('hook ingestion and dashboard decisions', () => {
   it('validates hook input', async () => {
     const { app } = await setup();
-    const res = await app.inject({
+    const res = await signed(app, {
       method: 'POST',
       url: '/api/hooks/permission-request',
-      headers: hookHeaders,
       payload: { sessionId: '', toolName: 'Bash', toolInput: 'rm -rf /' },
     });
     expect(res.statusCode).toBe(400);
@@ -147,7 +189,7 @@ describe('hook ingestion and dashboard decisions', () => {
     const a = await createDecision(app);
     expect(a.status).toBe('pending');
     expect(a.timeoutBehavior).toBe('deny');
-    const dup = await app.inject({ method: 'POST', url: '/api/hooks/permission-request', headers: hookHeaders, payload: permission() });
+    const dup = await signed(app, { method: 'POST', url: '/api/hooks/permission-request', payload: permission() });
     expect(dup.statusCode).toBe(200);
     expect(dup.json()).toMatchObject({ decisionId: a.decisionId, duplicate: true });
   });
@@ -156,7 +198,7 @@ describe('hook ingestion and dashboard decisions', () => {
     const { app } = await setup();
     const cookie = await login(app);
     const { decisionId } = await createDecision(app);
-    const waiting = app.inject({ method: 'GET', url: `/api/hooks/decisions/${decisionId}/wait?timeoutMs=5000`, headers: hookHeaders });
+    const waiting = signed(app, { method: 'GET', url: `/api/hooks/decisions/${decisionId}/wait?timeoutMs=5000` });
     const res = await app.inject({
       method: 'POST',
       url: `/api/decisions/${decisionId}/approve`,
@@ -175,7 +217,7 @@ describe('hook ingestion and dashboard decisions', () => {
     expect((await app.inject({ method: 'POST', url: `/api/decisions/${decisionId}/reject`, headers: h, payload: {} })).statusCode).toBe(200);
     const again = await app.inject({ method: 'POST', url: `/api/decisions/${decisionId}/approve`, headers: h, payload: {} });
     expect(again.statusCode).toBe(409);
-    const wait = await app.inject({ method: 'GET', url: `/api/hooks/decisions/${decisionId}/wait?timeoutMs=10`, headers: hookHeaders });
+    const wait = await signed(app, { method: 'GET', url: `/api/hooks/decisions/${decisionId}/wait?timeoutMs=10` });
     expect(wait.json().status).toBe('rejected');
   });
 
@@ -197,7 +239,7 @@ describe('hook ingestion and dashboard decisions', () => {
   it('tracks sessions and lifecycle events; ending a session cancels its pending decisions', async () => {
     const { app, services } = await setup();
     const post = (event: string, payload: Record<string, unknown>) =>
-      app.inject({ method: 'POST', url: '/api/hooks/event', headers: hookHeaders, payload: { event, payload: { session_id: 'session-1', cwd: '/work/shop-api', ...payload } } });
+      signed(app, { method: 'POST', url: '/api/hooks/event', payload: { event, payload: { session_id: 'session-1', cwd: '/work/shop-api', ...payload } } });
     expect((await post('SessionStart', { source: 'startup', model: 'claude-opus-5-5' })).statusCode).toBe(204);
     const { decisionId } = await createDecision(app);
     await post('Stop', { last_assistant_message: 'Done. token=abc123secretvalue' });

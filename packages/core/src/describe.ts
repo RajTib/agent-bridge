@@ -28,6 +28,10 @@ const SECRET_PATTERNS: [RegExp, string][] = [
   [/\bgithub_pat_[A-Za-z0-9_]{20,}\b/g, '[REDACTED GITHUB TOKEN]'],
   [/\bsk-(ant-)?[A-Za-z0-9_-]{16,}\b/g, '[REDACTED API KEY]'],
   [/\bxox[abposr]-[A-Za-z0-9-]{10,}\b/g, '[REDACTED SLACK TOKEN]'],
+  [/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, '[REDACTED JWT]'],
+  [/(\b[a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:)[^\s@/]+@/gi, '$1[REDACTED]@'],
+  [/(--?(?:password|passwd|pass|token|secret|api-?key|access-?key|auth)(?:=|\s+))("[^"]*"|'[^']*'|\S+)/gi, '$1[REDACTED]'],
+  [/(\b(?:mysql|mysqldump|mariadb)\b[^\n]*?\s-p)(?=[^\s-])\S+/g, '$1[REDACTED]'],
   [
     /\b([A-Za-z0-9_]*(?:api[_-]?key|token|secret|passw(?:or)?d|pwd)[A-Za-z0-9_]*)(\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s"'&;,}]+)/gi,
     '$1$2[REDACTED]',
@@ -74,8 +78,21 @@ function listWords(items: string[]): string {
   return `${items.slice(0, -1).join(', ')}, and ${items[items.length - 1]}`;
 }
 
+/** Shell syntax that chains, substitutes or redirects -- a benign prefix could hide anything after it. */
+export function isCompoundCommand(command: string): boolean {
+  return /[;&|`<>\n]|\$\(/.test(command.trim());
+}
+
 function describeShell(command: string, description: string | undefined): string {
   const cmd = command.trim();
+
+  if (isCompoundCommand(cmd)) {
+    // Never summarise only the first part of a chained command, and never present
+    // the model-written description as fact: the human must read the real thing.
+    const program = basename(cmd.split(/\s+/)[0] ?? 'a program');
+    const said = description?.trim() ? ` Claude describes it as: ${description.trim().replace(/\.$/, '')}.` : '';
+    return `run a compound shell command starting with ${program}. Please review the full command on your dashboard before approving.${said}`;
+  }
 
   const install = cmd.match(/^(npm|pnpm|yarn|bun)\s+(?:install|i|add)\b([^;&|\n]*)/i);
   if (install) {
@@ -115,13 +132,10 @@ function describeShell(command: string, description: string | undefined): string
       .slice(0, 3);
     return targets.length ? `delete ${listWords(targets)}` : 'delete files';
   }
-  if (description && description.trim()) {
-    const d = description.trim().replace(/\.$/, '');
-    return `run a shell command to ${d.charAt(0).toLowerCase()}${d.slice(1)}`;
-  }
-  if (cmd.length <= 48 && !/[;&|><`$\n]/.test(cmd)) return `run the shell command ${cmd}`;
+  if (cmd.length <= 60 && !/\$/.test(cmd)) return `run the shell command ${cmd}`;
   const program = basename(cmd.split(/\s+/)[0] ?? 'a program');
-  return `run a shell command using ${program}`;
+  const said = description?.trim() ? `. Claude describes it as: ${description.trim().replace(/\.$/, '')}` : '';
+  return `run a shell command using ${program}${said}`;
 }
 
 export function describeAction(toolName: string, input: Record<string, unknown>): ActionDescription {
@@ -135,7 +149,7 @@ export function describeAction(toolName: string, input: Record<string, unknown>)
     const command = str('command') ?? '';
     const description = str('description');
     spoken = describeShell(command, description);
-    summary = `${toolName}: ${oneLine(command)}`;
+    summary = `${toolName}: ${redactSecrets(command)}`;
     detail = `$ ${command}${description ? `\n\n# ${description}` : ''}`;
   } else if (toolName === 'Write') {
     const path = str('file_path') ?? 'a file';
@@ -180,7 +194,7 @@ export function describeAction(toolName: string, input: Record<string, unknown>)
     detail = JSON.stringify(input, null, 2);
   } else {
     spoken = `use the ${toolName} tool`;
-    summary = `${toolName}: ${oneLine(JSON.stringify(input))}`;
+    summary = `${toolName}: ${JSON.stringify(input).slice(0, 5000)}`;
     detail = JSON.stringify(input, null, 2);
   }
 
@@ -189,9 +203,10 @@ export function describeAction(toolName: string, input: Record<string, unknown>)
     const extra = detail.length - MAX_DETAIL_CHARS;
     detail = `${detail.slice(0, MAX_DETAIL_CHARS)}\n\n[... ${extra} more characters not stored]`;
   }
+  // Redact BEFORE truncating so a cut-off secret can't slip past a pattern.
   return {
     summary: oneLine(redactSecrets(summary), 200),
-    spoken: speakable(redactSecrets(spoken)),
+    spoken: speakable(redactSecrets(spoken), MAX_SPOKEN_CHARS + 120),
     detail,
   };
 }

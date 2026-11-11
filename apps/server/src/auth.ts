@@ -1,6 +1,7 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { CSRF_HEADER } from '@agentbridge/shared';
 import { newSecret, safeEqual, sha256, type Store } from '@agentbridge/core';
+import { HOOK_AUTH_WINDOW_MS, hookResponseProof, verifyHookRequest } from '@agentbridge/claude-code';
 
 export const SESSION_COOKIE = 'ab_session';
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
@@ -12,19 +13,58 @@ export interface AuthDeps {
   now: () => Date;
 }
 
-function bearer(req: FastifyRequest): string | null {
-  const h = req.headers.authorization;
-  if (!h || !h.startsWith('Bearer ')) return null;
-  return h.slice(7).trim() || null;
+const header = (req: FastifyRequest, name: string): string | undefined => {
+  const v = req.headers[name];
+  return Array.isArray(v) ? v[0] : v;
+};
+
+/** Pure signature check (no side effects); also used to exempt valid hook calls from rate limiting. */
+export function hasValidHookSignature(deps: AuthDeps, req: FastifyRequest): boolean {
+  return verifyHookRequest(
+    deps.hookToken,
+    {
+      method: req.method,
+      path: req.url,
+      ts: header(req, 'x-agentbridge-ts'),
+      nonce: header(req, 'x-agentbridge-nonce'),
+      signature: header(req, 'x-agentbridge-signature'),
+    },
+    deps.now().getTime(),
+  );
 }
 
-/** Hook client authentication: a shared bearer token, compared in constant time. */
-export function requireHookToken(deps: AuthDeps) {
+const AUTHENTICATED = Symbol('agentbridge.hookAuthenticated');
+
+/**
+ * Hook client authentication. The token is never transmitted: each request is
+ * HMAC-signed (method, path, timestamp, nonce), nonces are single-use within
+ * the validity window, and every response carries a proof the hook verifies,
+ * so neither side can be impersonated by a process squatting on the port.
+ */
+export function requireHookToken(deps: AuthDeps, onFailure: (req: FastifyRequest) => void) {
+  const seen = new Map<string, number>();
   return async (req: FastifyRequest, reply: FastifyReply) => {
-    const token = bearer(req);
-    if (!token || !safeEqual(token, deps.hookToken)) {
-      return reply.code(401).send({ error: 'invalid hook token' });
+    const now = deps.now().getTime();
+    for (const [n, exp] of seen) if (exp < now) seen.delete(n);
+    const nonce = header(req, 'x-agentbridge-nonce') ?? '';
+    if (!hasValidHookSignature(deps, req) || seen.has(nonce)) {
+      onFailure(req);
+      return reply.code(401).send({ error: 'invalid hook signature' });
     }
+    seen.set(nonce, now + HOOK_AUTH_WINDOW_MS * 2);
+    (req as unknown as Record<symbol, boolean>)[AUTHENTICATED] = true;
+  };
+}
+
+/** onSend hook: attach the response proof for authenticated hook requests. */
+export function hookResponseProofHook(deps: AuthDeps) {
+  return async (req: FastifyRequest, reply: FastifyReply, payload: unknown) => {
+    const nonce = header(req, 'x-agentbridge-nonce');
+    if (nonce && (req as unknown as Record<symbol, boolean>)[AUTHENTICATED]) {
+      const body = typeof payload === 'string' ? payload : payload == null ? '' : null;
+      if (body !== null) reply.header('x-agentbridge-proof', hookResponseProof(deps.hookToken, nonce, body));
+    }
+    return payload;
   };
 }
 

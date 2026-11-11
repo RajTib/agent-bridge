@@ -93,6 +93,7 @@ export function assessRisk(toolName: string, toolInput: Record<string, unknown>)
     const high = matchAll(HIGH_RISK_COMMANDS, command);
     if (high.length) return { level: 'high', reasons: high };
     const medium = matchAll(MEDIUM_RISK_COMMANDS, command);
+    if (/[;&|`<>\n]|\$\(/.test(command.trim())) medium.unshift('compound command (chained, piped or redirected)');
     return { level: 'medium', reasons: medium.length ? medium : ['runs a shell command'] };
   }
 

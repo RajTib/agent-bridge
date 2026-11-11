@@ -19,7 +19,14 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { PASSTHROUGH_TOOLS, type HookDecisionResponse } from '@agentbridge/shared';
-import { interpretDecisionResponse, renderPermissionOutput, type HookOutcome } from './output.js';
+import { randomBytes } from 'node:crypto';
+import {
+  interpretDecisionResponse,
+  renderPermissionOutput,
+  signHookRequest,
+  verifyHookResponse,
+  type HookOutcome,
+} from './output.js';
 
 const DEFAULT_URL = 'http://127.0.0.1:4317';
 
@@ -30,7 +37,9 @@ export interface HookEnv {
 }
 
 export function resolveHookEnv(env: NodeJS.ProcessEnv = process.env): HookEnv {
-  const baseUrl = (env.AGENTBRIDGE_URL ?? (env.AGENTBRIDGE_PORT ? `http://127.0.0.1:${env.AGENTBRIDGE_PORT}` : DEFAULT_URL)).replace(/\/+$/, '');
+  const baseUrl = (
+    env.AGENTBRIDGE_URL ?? (env.AGENTBRIDGE_PORT ? `http://127.0.0.1:${env.AGENTBRIDGE_PORT}` : DEFAULT_URL)
+  ).replace(/\/+$/, '');
   let token = env.AGENTBRIDGE_HOOK_TOKEN?.trim() || null;
   if (!token) {
     const dataDir = env.AGENTBRIDGE_DATA_DIR ?? join(homedir(), '.agentbridge');
@@ -47,25 +56,36 @@ async function readStdin(): Promise<string> {
   return Buffer.concat(chunks).toString('utf8');
 }
 
-async function request(
+export async function hookRequest(
   env: HookEnv,
   method: 'GET' | 'POST',
   path: string,
   body: unknown,
   timeoutMs: number,
 ): Promise<{ status: number; json: unknown }> {
-  const res = await fetch(`${env.baseUrl}${path}`, {
+  if (!env.token) throw new Error('no hook token');
+  // The token never leaves this process: requests are signed, responses must carry a proof.
+  const ts = String(Date.now());
+  const nonce = randomBytes(18).toString('base64url');
+  const url = new URL(`${env.baseUrl}${path}`);
+  const res = await fetch(url, {
     method,
     headers: {
       ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
-      ...(env.token ? { authorization: `Bearer ${env.token}` } : {}),
+      'x-agentbridge-ts': ts,
+      'x-agentbridge-nonce': nonce,
+      'x-agentbridge-signature': signHookRequest(env.token, method, `${url.pathname}${url.search}`, ts, nonce),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(timeoutMs),
   });
+  const text = await res.text();
+  if (!verifyHookResponse(env.token, nonce, text, res.headers.get('x-agentbridge-proof'))) {
+    throw new Error(`response from ${env.baseUrl} is not signed with the hook token (HTTP ${res.status}); ignoring it`);
+  }
   let json: unknown;
   try {
-    json = await res.json();
+    json = text ? JSON.parse(text) : null;
   } catch {
     json = null;
   }
@@ -96,7 +116,7 @@ export async function runPermissionRequest(
 
   let created: HookDecisionResponse;
   try {
-    const res = await request(
+    const res = await hookRequest(
       env,
       'POST',
       '/api/hooks/permission-request',
@@ -133,7 +153,7 @@ export async function runPermissionRequest(
   while (Date.now() < deadline) {
     const waitMs = Math.max(250, Math.min(pollMs, deadline - Date.now()));
     try {
-      const res = await request(
+      const res = await hookRequest(
         env,
         'GET',
         `/api/hooks/decisions/${encodeURIComponent(decisionId)}/wait?timeoutMs=${waitMs}`,
@@ -158,7 +178,7 @@ export async function runPermissionRequest(
 async function forwardEvent(eventName: string, payload: Record<string, unknown>, env: HookEnv): Promise<void> {
   if (!env.token) return;
   try {
-    await request(env, 'POST', '/api/hooks/event', { event: eventName, payload }, 2500);
+    await hookRequest(env, 'POST', '/api/hooks/event', { event: eventName, payload }, 2500);
   } catch {
     // Informational only -- never block or fail Claude Code over a notification.
   }

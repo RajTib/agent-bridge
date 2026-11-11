@@ -230,7 +230,8 @@ export class CallManager {
       const now = this.o.decisions.get(d.id);
       if (now && now.status !== 'pending') await this.onDecisionResolved(now);
     } catch (err) {
-      const message = (err as Error).message.slice(0, 300);
+      // Provider errors can echo the destination number; mask any phone numbers.
+      const message = (err as Error).message.replace(/\+?\d[\d\s-]{7,16}\d/g, (m) => maskPhone(m)).slice(0, 300);
       const failed = this.o.store.updateCall(call.id, {
         status: 'failed',
         result: 'error',
@@ -525,7 +526,7 @@ export class CallManager {
       const outcome = key === '1' ? 'approved' : 'rejected';
       const res = this.o.decisions.resolve(d.id, outcome, {
         channel: 'phone',
-        by: `phone ${call.toMasked}`,
+        by: call.isRealCall ? `phone ${call.toMasked}` : 'simulated phone (mock provider, dashboard user)',
         callId: call.id,
         note: `Keypad ${key} on ${call.isRealCall ? 'phone call' : 'simulated call'} ${call.id}`,
       });

@@ -43,15 +43,28 @@ is bound to exactly one decision id, so one call can never authorize a different
 
 ## Authentication
 
-- **Hook API**: 256-bit bearer token (`<data dir>/hook-token`, mode 0600, or
-  `AGENTBRIDGE_HOOK_TOKEN`), compared in constant time.
+- **Hook API**: a 256-bit shared token (`<data dir>/hook-token`, mode 0600, or
+  `AGENTBRIDGE_HOOK_TOKEN` of 32+ chars). The token is **never sent over the wire**.
+  Requests carry `HMAC(token, method|path|timestamp|nonce)` with a 5-minute window and
+  single-use nonces. Every response carries `HMAC(token, nonce|body)`, which the hook
+  verifies before trusting it. A process squatting on the port while the server is down
+  can therefore neither learn the token nor forge an approval (covered by a regression
+  test). Requests without a valid signature are rate limited and audited.
+- **Tunnel exposure**: requests that arrive through the public URL (matched by its `Host`,
+  or by a `CF-Connecting-IP`/`X-Forwarded-For` header) can reach only `/telephony/*`. The
+  dashboard is reachable remotely only with `AGENTBRIDGE_EXPOSE_DASHBOARD=true`. The hook
+  API is never reachable remotely.
 - **Dashboard**: password (≥ 12 chars) → random session token. Only its SHA-256 is stored
   server-side; it lives in an `HttpOnly; SameSite=Strict` cookie (`Secure` over HTTPS) with
   a 12 h lifetime. Mutations also require the `x-agentbridge-csrf` header and a same-origin
   `Origin`. Login is rate limited (10 per 15 min per IP); the API is limited globally.
 - **Network**: binds `127.0.0.1` by default. For real calls, expose it only through an
-  HTTPS tunnel. Everything except `/telephony/*` and `/api/health` still requires
-  authentication through the tunnel.
+  HTTPS tunnel. Leave `AGENTBRIDGE_TRUST_PROXY=false` unless you run your own reverse
+  proxy: with it enabled, `X-Forwarded-For` decides the client IP used for rate limiting.
+- **Voice summaries**: chained, piped or redirected shell commands are never summarized by
+  their first part. The call says "a compound shell command starting with X, review the
+  full command on your dashboard". Claude's own description of a command is read out as a
+  quote ("Claude describes it as: ..."), never stated as fact.
 
 ## Data handling
 

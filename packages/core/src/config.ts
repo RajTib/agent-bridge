@@ -37,6 +37,7 @@ const EnvSchema = z.object({
   AGENTBRIDGE_HOOK_TOKEN: optionalString,
   AGENTBRIDGE_DASHBOARD_PASSWORD: optionalString,
   AGENTBRIDGE_TRUST_PROXY: bool,
+  AGENTBRIDGE_EXPOSE_DASHBOARD: bool,
   AGENTBRIDGE_LOG_LEVEL: optionalString,
   AGENTBRIDGE_DASHBOARD_DIR: optionalString,
 
@@ -79,6 +80,8 @@ export interface AppConfig {
   /** Explicit dashboard password; when absent the server generates one in dataDir. */
   dashboardPassword: string | null;
   trustProxy: boolean;
+  /** Allow the dashboard (never the hook API) to be reached through the public tunnel. */
+  exposeDashboard: boolean;
   logLevel: string;
   dashboardDir: string | null;
 
@@ -175,8 +178,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (e.AGENTBRIDGE_DASHBOARD_PASSWORD && e.AGENTBRIDGE_DASHBOARD_PASSWORD.length < 12) {
     problems.push('AGENTBRIDGE_DASHBOARD_PASSWORD must be at least 12 characters');
   }
-  if (e.AGENTBRIDGE_HOOK_TOKEN && e.AGENTBRIDGE_HOOK_TOKEN.length < 24) {
-    problems.push('AGENTBRIDGE_HOOK_TOKEN must be at least 24 characters');
+  if (e.AGENTBRIDGE_HOOK_TOKEN && e.AGENTBRIDGE_HOOK_TOKEN.length < 32) {
+    problems.push('AGENTBRIDGE_HOOK_TOKEN must be at least 32 characters (leave it unset to auto-generate one)');
   }
 
   if (e.DISCORD_WEBHOOK_URL) {
@@ -199,6 +202,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     hookToken: e.AGENTBRIDGE_HOOK_TOKEN ?? null,
     dashboardPassword: e.AGENTBRIDGE_DASHBOARD_PASSWORD ?? null,
     trustProxy: e.AGENTBRIDGE_TRUST_PROXY ?? false,
+    exposeDashboard: e.AGENTBRIDGE_EXPOSE_DASHBOARD ?? false,
     logLevel: e.AGENTBRIDGE_LOG_LEVEL ?? 'info',
     dashboardDir: e.AGENTBRIDGE_DASHBOARD_DIR ?? null,
     approvalTimeoutSeconds: e.APPROVAL_TIMEOUT_SECONDS,

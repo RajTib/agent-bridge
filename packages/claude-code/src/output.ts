@@ -15,6 +15,52 @@
  *    prompt, and in non-interactive mode denies -- or an explicit deny.
  */
 
+import { createHmac, timingSafeEqual } from 'node:crypto';
+
+/**
+ * Mutual authentication between the hook and the server without ever sending
+ * the token itself. A process squatting on the server's port therefore can
+ * neither steal the token nor forge an "approved" response.
+ *
+ *   request  headers: x-agentbridge-ts, x-agentbridge-nonce,
+ *                     x-agentbridge-signature = HMAC(token, method\npath\nts\nnonce)
+ *   response header:  x-agentbridge-proof     = HMAC(token, "response"\nnonce\nbody)
+ */
+export const HOOK_AUTH_WINDOW_MS = 5 * 60 * 1000;
+
+function hmac(token: string, data: string): string {
+  return createHmac('sha256', token).update(data).digest('hex');
+}
+
+function sameHex(a: string, b: string): boolean {
+  const x = Buffer.from(a);
+  const y = Buffer.from(b);
+  return x.length === y.length && timingSafeEqual(x, y);
+}
+
+export function signHookRequest(token: string, method: string, path: string, ts: string, nonce: string): string {
+  return hmac(token, `${method.toUpperCase()}\n${path}\n${ts}\n${nonce}`);
+}
+
+export function verifyHookRequest(
+  token: string,
+  h: { method: string; path: string; ts?: string; nonce?: string; signature?: string },
+  now = Date.now(),
+): boolean {
+  if (!h.ts || !h.nonce || !h.signature || h.nonce.length < 16 || h.nonce.length > 128) return false;
+  const ts = Number(h.ts);
+  if (!Number.isFinite(ts) || Math.abs(now - ts) > HOOK_AUTH_WINDOW_MS) return false;
+  return sameHex(h.signature, signHookRequest(token, h.method, h.path, h.ts, h.nonce));
+}
+
+export function hookResponseProof(token: string, nonce: string, body: string): string {
+  return hmac(token, `response\n${nonce}\n${body}`);
+}
+
+export function verifyHookResponse(token: string, nonce: string, body: string, proof: string | null): boolean {
+  return Boolean(proof) && sameHex(proof!, hookResponseProof(token, nonce, body));
+}
+
 export type HookOutcome =
   | { kind: 'approved'; decisionId: string; via: string | null }
   | { kind: 'rejected'; decisionId: string; via: string | null; note: string | null }

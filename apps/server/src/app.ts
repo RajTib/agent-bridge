@@ -20,7 +20,7 @@ import {
 } from '@agentbridge/core';
 import { CallManager, MockTelephonyProvider, createProvider, type TelephonyProvider } from '@agentbridge/telephony';
 import { ALL_DISCORD_KINDS, DiscordNotifier, type DiscordKind } from '@agentbridge/discord';
-import type { AuthDeps } from './auth.js';
+import { hasValidHookSignature, isDashboardAuthenticated, type AuthDeps } from './auth.js';
 import { registerRoutes } from './routes.js';
 
 export interface Services {
@@ -150,14 +150,32 @@ export async function buildApp(o: BuildOptions): Promise<{ app: FastifyInstance;
           },
   });
 
+  // Requests arriving through the public tunnel may only reach the telephony
+  // webhooks (and, if explicitly enabled, the dashboard). The hook API is
+  // local-only, always. Runs before rate limiting so blocked paths can't
+  // consume the owner's or the provider's rate-limit budget.
+  const publicHost = config.publicUrl ? new URL(config.publicUrl).host : null;
+  app.addHook('onRequest', async (req, reply) => {
+    const viaTunnel =
+      (publicHost !== null && req.headers.host === publicHost) ||
+      req.headers['cf-connecting-ip'] !== undefined ||
+      req.headers['x-forwarded-for'] !== undefined;
+    if (!viaTunnel || req.url.startsWith('/telephony/')) return;
+    if (config.exposeDashboard && !req.url.startsWith('/api/hooks/')) return;
+    return reply.code(404).send({ error: 'not found' });
+  });
+
   await app.register(cookie);
   await app.register(formbody, { bodyLimit: 64 * 1024 });
   await app.register(rateLimit, {
     global: true,
     max: 600,
     timeWindow: '1 minute',
-    // Long-polling hooks and SSE are authenticated and cheap; never lock them out.
-    allowList: (req) => req.url.startsWith('/api/hooks/') || req.url === '/api/stream',
+    // Long-polls from a correctly signed hook and the authenticated SSE stream are
+    // exempt; unauthenticated traffic to these paths is rate limited like any other.
+    allowList: (req) =>
+      (req.url.startsWith('/api/hooks/') && hasValidHookSignature(authDeps, req)) ||
+      (req.url === '/api/stream' && isDashboardAuthenticated(authDeps, req)),
   });
 
   app.addHook('onSend', async (req, reply, payload) => {

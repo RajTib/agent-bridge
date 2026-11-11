@@ -14,6 +14,7 @@ import {
   checkPassword,
   createDashboardSession,
   destroyDashboardSession,
+  hookResponseProofHook,
   isDashboardAuthenticated,
   requireDashboard,
   requireHookToken,
@@ -61,17 +62,30 @@ function badRequest(reply: FastifyReply, err: z.ZodError) {
 
 export async function registerRoutes(app: FastifyInstance, s: Services): Promise<void> {
   const deps = s.authDeps;
-  const hookAuth = requireHookToken(deps);
+  let lastFailureAudit = 0;
+  const hookAuth = requireHookToken(deps, (req) => {
+    // Audit failed hook auth, throttled so a flood can't bloat the audit log.
+    const now = Date.now();
+    if (now - lastFailureAudit > 60_000) {
+      lastFailureAudit = now;
+      s.audit.record({
+        type: 'webhook.rejected',
+        level: 'warn',
+        message: `Rejected hook API request with an invalid signature from ${req.ip}`,
+      });
+    }
+  });
   const dashAuth = requireDashboard(deps);
 
   // ---- public ---------------------------------------------------------
 
   app.get('/api/health', async () => ({ ok: true, version: VERSION }));
 
-  // ---- Claude Code hook API (bearer token) -----------------------------
+  // ---- Claude Code hook API (HMAC-signed, mutually authenticated) ------
 
   app.register(async (hooks) => {
     hooks.addHook('onRequest', hookAuth);
+    hooks.addHook('onSend', hookResponseProofHook(deps));
 
     hooks.get('/api/hooks/ping', async () => ({ ok: true }));
 

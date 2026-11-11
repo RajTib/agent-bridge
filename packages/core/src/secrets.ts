@@ -16,7 +16,7 @@ export function defaultDataDir(): string {
  * Secret values are never logged.
  */
 function writeSecretFile(dataDir: string, path: string, value: string): void {
-  mkdirSync(dataDir, { recursive: true });
+  mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   writeFileSync(path, `${value}\n`, { encoding: 'utf8', mode: 0o600 });
   try {
     chmodSync(path, 0o600);
