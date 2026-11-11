@@ -1,117 +1,146 @@
 # AgentBridge
 
-A provider-agnostic, agent-agnostic approval/notification router for AI coding agents.
+**Approve Claude Code's actions from your phone, by actually picking up the phone.**
 
-When an AI coding agent (Claude Code first, others later) needs human input or permission
-to run something, AgentBridge relays the request — with full, untruncated context — to a
-human-facing channel (Discord first, others later), and relays the human's Approve/Deny
-decision back to the agent.
+When Claude Code hits an action that needs your permission, AgentBridge calls you. A voice
+explains what Claude wants to do, and you answer on the keypad:
 
-> **Status:** MVP in progress. The full pipeline (hook → daemon → relay → Discord → decision
-> round-trip) works and is verified with a simulated Claude Code hook payload. Not yet
-> validated against a real, live Claude Code session -- that's the next milestone.
+> "Hello. This is AgentBridge calling on behalf of Claude Code. In the project
+> payments-service, Claude wants to install a new dependency called jsonwebtoken.
+> It needs your approval because your Claude Code permission settings require
+> confirmation for this action. To approve this action, press 1. To reject this
+> action, press 0. To repeat this message, press 2."
 
-## What this is not
-
-AgentBridge is **not** about making multiple AI agents collaborate with each other. It is
-a router between one AI agent that needs a human decision and one human-facing channel
-that decision can be made from.
-
-## Prior art, and why this project exists anyway
-
-Claude Code ships native mobile push+approve (Remote Control), and OpenAI's Codex has its
-own mobile app with the same capability. Several single-purpose open-source scripts already
-bridge Claude Code to Discord, ntfy, or Telegram individually.
-
-None of that is what AgentBridge is for. Each of those solves "notify me on my phone" for
-exactly one agent and, often, exactly one channel. AgentBridge is for the case where you
-use more than one coding agent, or want to route approvals to more than one channel,
-without maintaining a separate hardcoded script per (agent, channel) pair. It does this with:
-
-- A real adapter interface (`AgentAdapter`, `ChannelAdapter`) — adding a new agent or
-  channel means implementing an interface, not forking a script.
-- A security model that doesn't rely on a shared-secret topic name. Each pending approval
-  gets a signed, single-use, expiring token.
-- Full, unabridged context delivered to the human. Approval UIs that truncate or summarize
-  the dangerous part of a command are a known vulnerability class (dubbed *GhostApproval*
-  after several agent approval UIs were found hiding risky details from reviewers in 2026).
-- A structured, append-only audit log of every decision: who approved what, when, and from
-  where.
-- A safe timeout: if nobody responds in time, control falls back to the agent's normal
-  terminal prompt rather than silently blocking or auto-approving.
-
-## Architecture
+Your key press goes straight back to the waiting Claude Code permission prompt. A live
+dashboard shows the full details, call history and audit trail, and gives you manual
+approve/reject buttons as a fallback. Discord notifications are optional.
 
 ```
- AI agent (Claude Code, ...)
-        │  native hook/event format
-        ▼
- ┌───────────────┐        normalized event         ┌──────────────┐
- │ Agent adapter │ ───────────────────────────────▶ │  Core relay  │
- │ (per-agent)   │ ◀─────────────────────────────── │  (daemon)    │
- └───────────────┘        approval outcome          └──────┬───────┘
-                                                             │ pending approval
-                                                             ▼
-                                                     ┌────────────────┐
-                                                     │ Channel adapter │
-                                                     │ (per-channel)   │
-                                                     └────────┬────────┘
-                                                              │ render + deliver
-                                                              ▼
-                                                          human (Discord, ...)
+Claude Code ──PermissionRequest hook──▶ AgentBridge server ──REST──▶ Twilio ──▶ your phone
+     ▲                                     │   ▲                                 │ keypad 1 / 0
+     └──── allow / deny (hook stdout) ─────┘   └──── signed DTMF webhook ◀───────┘
+                                           │
+                                           ├──▶ dashboard (SSE live updates, manual fallback)
+                                           └──▶ Discord webhook (optional notifications)
 ```
 
-- **Agent adapters** translate a tool's native hook/event format into one normalized shape
-  (`{ agent, sessionId, eventType, summary, fullContext, riskHint }`) and translate a
-  decided outcome back into whatever that tool expects (exit code, stdout JSON, decision
-  file).
-- **Core relay** owns the approval lifecycle end to end: pending → approved / denied /
-  timed out. Issues signed, single-use, expiring tokens per pending approval. Routes events
-  to channels per `config/agentbridge.yml`. Writes a structured audit log.
-- **Channel adapters** are pure send/receive: render a pending approval with full context,
-  deliver it, and report the human's decision back to the core relay. They never touch the
-  filesystem directly.
+## Safety first
 
-Full interface definitions live in `packages/contracts`.
+- **Fail closed.** Only an explicit approval of *that exact* pending action produces an
+  `allow`. Timeouts, failed or unanswered calls, invalid keys, an unreachable server, or a
+  malformed response never approve anything. Claude Code falls back to its normal prompt
+  (or, with `APPROVAL_TIMEOUT_BEHAVIOR=deny`, is told the action was denied).
+- **Respects your permission rules.** AgentBridge hooks Claude Code's `PermissionRequest`
+  event, which only fires when Claude Code would have asked you anyway. Your
+  allow/deny/ask rules are untouched, and AgentBridge never adds permanent allow rules.
+- **One call, one action.** Every call is bound to one unguessable decision id. Webhooks
+  are signature-verified, bound to the provider call id and a trusted number, and each
+  keypad prompt can be answered exactly once, so a replayed webhook can't approve
+  anything.
+- No blanket "approve everything" option exists.
 
-## Repo layout
+See [docs/security.md](docs/security.md).
 
+## Quick start (simulated calls, about 2 minutes)
+
+Requirements: Node.js 22.13+ (24 recommended), Git, Claude Code.
+
+```bash
+npm install
+npm run setup          # creates .env with a generated dashboard password
+npm run build
+npm start              # http://127.0.0.1:4317 (password is in .env)
+npm run hooks:install  # adds the hooks to ~/.claude/settings.json (backup made)
+node packages/claude-code/dist/cli.js status   # checks hook -> server connectivity
 ```
-packages/
-  contracts/              shared types + AgentAdapter / ChannelAdapter interfaces
-  core/                    the relay daemon: state machine, tokens, audit log, routing
-  adapters-agent/
-    claude-code/           Claude Code hook installer + event normalizer
-  adapters-channel/
-    discord/               Discord bot: message renderer + Approve/Deny handler
-  cli/                     the `agentbridge` command users actually run
-config/
-  agentbridge.example.yml  routing config template
-docs/
-  architecture.md
-  security.md
-  writing-an-adapter.md
+
+`TELEPHONY_PROVIDER=mock` is the default. **The mock provider places no real phone calls.**
+It runs the whole flow through the same signed-webhook code path, and you play the phone in
+the dashboard's **Mock phone** panel or from the terminal:
+
+```bash
+node scripts/mock-answer.mjs --press 1    # answer the next simulated call and approve
 ```
+
+Now ask Claude Code to do something that needs permission, such as running a shell
+command. The decision appears on the dashboard, a simulated call rings, and pressing 1 lets
+Claude continue.
+
+To install the hooks for a single project instead of globally:
+`node packages/claude-code/dist/cli.js install --project /path/to/project` (writes the
+git-ignored `.claude/settings.local.json`). Remove them with `npm run hooks:uninstall`.
+
+## Real phone calls (Twilio)
+
+1. Create a Twilio account and get a voice number. On a trial account, **verify your own
+   mobile number** under *Verified Caller IDs*.
+2. Expose the server over HTTPS so Twilio can deliver key presses, for example:
+   `cloudflared tunnel --url http://127.0.0.1:4317` (or `ngrok http 4317`).
+3. Set the following in `.env`, then restart:
+   ```ini
+   TELEPHONY_PROVIDER=twilio
+   PHONE_TO_NUMBER=+91XXXXXXXXXX
+   TWILIO_ACCOUNT_SID=AC...
+   TWILIO_AUTH_TOKEN=...
+   TWILIO_FROM_NUMBER=+1XXXXXXXXXX
+   AGENTBRIDGE_PUBLIC_URL=https://<your-tunnel-host>
+   ```
+4. The dashboard header should read **"Twilio · real calls"**. Use **Call me** on a pending
+   decision to test.
+
+Provider evaluation, India-specific notes (caller ID, TRAI/DLT, trial limits) and how to add
+providers: [docs/telephony.md](docs/telephony.md).
+
+## Configuration
+
+All configuration is through environment variables. See [.env.example](.env.example) for
+the full, commented list. Highlights:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `APPROVAL_TIMEOUT_SECONDS` | 300 | How long a request waits for a decision |
+| `APPROVAL_TIMEOUT_BEHAVIOR` | `ask` | `ask` returns to Claude Code's prompt; `deny` denies. Neither approves |
+| `CALL_MIN_RISK` | `low` | Only call for requests at or above this risk |
+| `CALL_MAX_ATTEMPTS` | 2 | Calls per decision (unanswered or failed calls are retried) |
+| `DTMF_MAX_PROMPTS` | 3 | Invalid inputs or silences before hanging up (not approved) |
+| `TRUSTED_PHONE_NUMBERS` | `PHONE_TO_NUMBER` | Calls are only placed to, and accepted from, these numbers |
+
+## Docker
+
+```bash
+docker compose up -d --build     # dashboard on 127.0.0.1:4317, data in ./data
+```
+
+The hook runs on the host. Point it at the container's token with
+`AGENTBRIDGE_DATA_DIR=<repo>/data` (or set the same `AGENTBRIDGE_HOOK_TOKEN` in both
+places).
 
 ## Development
 
 ```bash
-npm install
-npm run build
+npm run build      # tsc project references + Vite dashboard build
 npm run lint
-npm run typecheck
-npm test
+npm test           # unit, HTTP integration and end-to-end tests (run after build)
+npm run dev:dashboard   # Vite dev server on :5173, proxied to the API on :4317
 ```
 
-## Roadmap (MVP)
+Layout:
 
-- [x] Repo scaffold, tooling, CI
-- [x] Claude Code agent adapter (hook installer + normalizer)
-- [x] Discord channel adapter (bot + renderer + button handler)
-- [x] Core relay (state machine, signed tokens, timeout, audit log)
-- [ ] End-to-end demo (fake PermissionRequest → Discord → Approve → decision round-trip)
-- [ ] `CONTRIBUTING.md` — how to add a new agent or channel adapter
+```
+apps/server          Fastify server: hook API, telephony webhooks, dashboard API + SSE
+apps/dashboard       React + Vite dashboard
+packages/shared      domain types shared by everything
+packages/core        config, SQLite store + migrations, decision state machine, risk, redaction
+packages/telephony   provider interface, Twilio, mock, call manager, voice script
+packages/claude-code hook client, settings installer, output rendering
+packages/discord     Discord webhook notifier
+tests/               end-to-end tests (the real hook script as a child process)
+scripts/             setup and simulated handset helpers
+```
+
+More: [architecture](docs/architecture.md) · [Claude Code integration](docs/claude-code.md) ·
+[telephony](docs/telephony.md) · [security](docs/security.md)
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+MIT. See [LICENSE](LICENSE).
